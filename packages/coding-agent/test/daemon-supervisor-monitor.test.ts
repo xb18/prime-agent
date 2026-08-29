@@ -282,7 +282,6 @@ function seedSupervisorRoster(
 	...workers: Array<{ descriptor: { workerId: string }; summaries: Map<string, SessionSummary> }>
 ): void {
 	const internals = supervisor as {
-	const internals = supervisor as {
 		writeRosterEntry(entry: ReturnType<typeof workerRosterEntryFromSummary>, worker?: object): unknown;
 		clients?: Set<unknown>;
 	};
