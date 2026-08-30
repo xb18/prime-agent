@@ -57,8 +57,8 @@ import { attachJsonlLineReader, serializeJsonLine } from "../rpc/jsonl.js";
 import type { PrivateFrame } from "../session-worker/private-framing.js";
 import { createActiveSessionId, type DaemonSocketClient } from "./active-session-state.js";
 import {
+	AgentRoster,
 	type AgentRosterEntry,
-	AgentRosterLedger,
 	type AgentRosterMutation,
 	passivatedWorkerRosterEntry,
 	rosterAgentIdForSummary,
@@ -654,7 +654,7 @@ export class DaemonSupervisor {
 	private readonly pendingSessionNames = new Set<string>();
 	private readonly catalog: DaemonCatalogClient;
 	private readonly settingsManager: SettingsManager;
-	private rosterStore?: AgentRosterLedger;
+	private rosterStore?: AgentRoster;
 	private readonly pendingRosterChanged = new Set<string>();
 	private readonly pendingRosterRemoved = new Set<string>();
 	private rosterPushScheduled = false;
@@ -3574,14 +3574,18 @@ export class DaemonSupervisor {
 			if (recovery) {
 				await this.assertRecoveryAllowed();
 			}
-			worker.descriptor.rootSessionId = root.sessionId;
-			worker.descriptor.sessionFile = root.sessionFile;
-			worker.descriptor.createCommand = durableDaemonCreateCommand({
-				type: "create",
-				sessionPath: root.sessionFile,
-				noSession: worker.descriptor.createCommand.noSession,
+			// The pulled root persists through the same chain and epoch guard; a frame since the pull owns fresher pointers.
+			await this.chainWorkerRosterApply(worker, () => {
+				if ((worker.rosterEpoch ?? 0) !== epochAtStart) return;
+				worker.descriptor.rootSessionId = root.sessionId;
+				worker.descriptor.sessionFile = root.sessionFile;
+				worker.descriptor.createCommand = durableDaemonCreateCommand({
+					type: "create",
+					sessionPath: root.sessionFile,
+					noSession: worker.descriptor.createCommand.noSession,
+				});
+				this.persistWorker(worker);
 			});
-			this.persistWorker(worker);
 		}
 	}
 
@@ -3635,8 +3639,8 @@ export class DaemonSupervisor {
 	}
 
 	// The agent roster: the single supervisor-side projection every list and selector read is served from.
-	private roster(): AgentRosterLedger {
-		this.rosterStore ??= new AgentRosterLedger(canonicalSessionPath, (mutation) => this.onRosterMutation(mutation));
+	private roster(): AgentRoster {
+		this.rosterStore ??= new AgentRoster(canonicalSessionPath, (mutation) => this.onRosterMutation(mutation));
 		return this.rosterStore;
 	}
 

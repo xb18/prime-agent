@@ -112,7 +112,7 @@ export function sessionSummaryFromRosterEntry(entry: WorkerRosterEntry | AgentRo
 export type AgentRosterMutation = { type: "write"; agentId: string } | { type: "delete"; agentId: string };
 
 // Supervisor-owned roster store; write() classifies once and its file index converges seed and worker keys.
-export class AgentRosterLedger {
+export class AgentRoster {
 	private readonly entries = new Map<string, AgentRosterEntry>();
 	private readonly agentIdByActiveSessionId = new Map<string, string>();
 	private readonly agentIdBySessionFile = new Map<string, string>();
