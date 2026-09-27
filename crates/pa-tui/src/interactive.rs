@@ -3586,8 +3586,35 @@ impl Renderer {
         // +O(rows) peak right at exit) — the bytes are the materialized
         // flush's bytes, the peak is one section plus one chunk.
         let mut out = std::io::stdout();
-        view.stream_flush_to(&mut out, width as usize, height as usize)?;
-        out.flush()?;
+        // PROBE-ONLY (tui-scroll-retain2): tee the streamed flush bytes to
+        // PA_TUI_FLUSH_DUMP for the ANSI byte-parity oracle (never ships).
+        struct FlushTee<W: std::io::Write> {
+            out: W,
+            dump: Option<std::fs::File>,
+        }
+        impl<W: std::io::Write> std::io::Write for FlushTee<W> {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                if let Some(dump) = self.dump.as_mut() {
+                    let _ = dump.write_all(buf);
+                }
+                self.out.write(buf)
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                self.out.flush()
+            }
+        }
+        let dump = std::env::var("PA_TUI_FLUSH_DUMP")
+            .ok()
+            .and_then(|path| {
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .ok()
+            });
+        let mut tee = FlushTee { out, dump };
+        view.stream_flush_to(&mut tee, width as usize, height as usize)?;
+        tee.flush()?;
         Ok(())
     }
 
