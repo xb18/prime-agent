@@ -3585,7 +3585,7 @@ impl Renderer {
         // must reach the terminal without ever holding the whole frame (a
         // +O(rows) peak right at exit) — the bytes are the materialized
         // flush's bytes, the peak is one section plus one chunk.
-        let mut out = std::io::stdout();
+        let out = std::io::stdout();
         // PROBE-ONLY (tui-scroll-retain2): tee the streamed flush bytes to
         // PA_TUI_FLUSH_DUMP for the ANSI byte-parity oracle (never ships).
         struct FlushTee<W: std::io::Write> {
