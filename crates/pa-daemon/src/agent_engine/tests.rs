@@ -5171,7 +5171,7 @@ fn agent_engine_streams_updates_and_final_message() {
 /// read plus a full `parse_session_entries` walk. The scan
 /// (`model::persisted_rlm_max_depth`) must match it on every class.
 fn persisted_rlm_max_depth_reference(path: Option<&str>) -> Option<u64> {
-    let path = std::path::Path::new(path?)?;
+    let path = std::path::Path::new(path?);
     let content = std::fs::read_to_string(path).ok()?;
     crate::session_store::parse_session_entries(&content)
         .iter()
