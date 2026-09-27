@@ -756,7 +756,8 @@ impl AgentSessionEngine {
                     let Some(path) = path else {
                         return (None, None, None);
                     };
-                    if let Ok(Some(window)) = pa_core::session::window::WindowedSessionStore::open(&path)
+                    if let Ok(Some(window)) =
+                        pa_core::session::window::WindowedSessionStore::open(&path)
                     {
                         let goal = window.goal_state().cloned();
                         (goal, Some(window), None)
