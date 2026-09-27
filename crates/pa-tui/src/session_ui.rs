@@ -191,6 +191,62 @@ pub(crate) struct PromptOrder {
     pub(crate) rebind_available: bool,
 }
 
+/// The prompt/turn-end pairing watermark (the ordered submit channel's
+/// settle arithmetic, no TS counterpart — TS's single event loop owns the
+/// loader state directly and its `handleEvent` order cannot lose an end):
+/// every admitted prompt reserves the next end in submit order, and a
+/// landed end settles exactly the prompt that reserved it — so the
+/// complete-turn-before-ack window cannot re-arm the loader for a turn
+/// that already ended, and a queued prompt's loader is not cleared by the
+/// prior turn's end.
+///
+/// The pairing holds only over ends the pane's subscription can deliver.
+/// A fresh attach ([`SessionUi::attach_session`] — the initial attach, a
+/// `/switch`, or a supersede rebind) replaces the pane's event source,
+/// and ends of the switched-away subscription never arrive on the new
+/// one: the wedge family the exit-gate bisection caught (the outlived
+/// submit's delayed end dropped by the switch, the next submit's ack
+/// re-arming the loader against a watermark it could never reach —
+/// `turn_active` latched with every participant idle). The watermark
+/// re-bases at every attach, so each submit reserves the next end THE
+/// MOUNTED SUBSCRIPTION will deliver. Same-session sequences are a
+/// uniform shift of both counters: identical arming decisions before and
+/// after.
+#[derive(Debug, Default)]
+struct TurnEndWatermark {
+    /// Ends observed on the pane's current subscription.
+    ends_seen: u64,
+    /// The last reserved end (submit order).
+    last_expected: u64,
+}
+
+impl TurnEndWatermark {
+    /// Reserve this submit's expected end in submit order.
+    fn next_expected(&mut self) -> u64 {
+        let expected = self.last_expected.max(self.ends_seen) + 1;
+        self.last_expected = expected;
+        expected
+    }
+
+    /// One completed turn observed on the pane's subscription.
+    fn note_turn_end(&mut self) {
+        self.ends_seen += 1;
+    }
+
+    /// Whether the submit's expected end already landed (the ack's loader
+    /// re-arm gate: an end that beat its own ack must not re-arm).
+    fn end_already_seen(&self, expected: u64) -> bool {
+        self.ends_seen >= expected
+    }
+
+    /// Re-base to the ends the freshly attached subscription will deliver:
+    /// the switched-away session's ends can never arrive here.
+    fn rebase(&mut self) {
+        self.ends_seen = 0;
+        self.last_expected = 0;
+    }
+}
+
 /// One backgrounded compaction-abort outcome (the abort supervision's UI
 /// recovery): a failed abort request surfaces as the transcript note and
 /// clears the stuck compaction loader locally — when even the abort could
@@ -451,11 +507,10 @@ pub(crate) struct SessionUi {
     /// Rows of the most recent `/list` (for `/switch <n>`).
     list_rows: Vec<Value>,
     pub(crate) turn_active: bool,
-    /// Completed turns observed on this connection. A prompt ACK may arrive
-    /// after its entire streamed turn; it must not restart the loader then.
-    turn_ends_seen: u64,
-    /// The last submitted prompt's expected completion in wire order.
-    last_prompt_turn_end: u64,
+    /// The prompt/turn-end pairing watermark (see [`TurnEndWatermark`]): a
+    /// prompt ACK may arrive after its entire streamed turn and must not
+    /// restart the loader then.
+    turn_end_watermark: TurnEndWatermark,
     /// The session's queue delivery mode (TS `steeringMode`, the state's
     /// `steeringMode`): `all` delivers the queued steering prefix as one
     /// batched turn at the boundary; `one-at-a-time` one per turn. The
@@ -906,8 +961,7 @@ impl SessionUi {
             subagents_cost_usd: None,
             list_rows: Vec::new(),
             turn_active: false,
-            turn_ends_seen: 0,
-            last_prompt_turn_end: 0,
+            turn_end_watermark: TurnEndWatermark::default(),
             steering_mode: "all".to_string(),
             streaming_index: None,
             working_tokens: LoaderTokenTracker::default(),
@@ -1317,6 +1371,13 @@ impl SessionUi {
         });
         self.turn_active = streaming;
         self.streaming_index = None;
+        // The attach replaced the pane's event source: ends of the
+        // switched-away subscription never arrive on the new one, so the
+        // prompt/turn-end pairing re-bases to the ends this subscription
+        // will deliver (see [`TurnEndWatermark`]) — an outlived submit's
+        // undeliverable end must not inflate the watermark a later
+        // submit can never reach (the exit-gate wedge family).
+        self.turn_end_watermark.rebase();
         // TS `applyConnectionStateSnapshot` -> `bindPromptStashSession`: the
         // stash state follows the stable id of the session now rendered.
         // The initial attach and every in-place switch (`/switch`, `/new`)
@@ -2770,8 +2831,7 @@ impl SessionUi {
         // earlier submit still in flight held `turn_active` true on the
         // inline path too, so it counts here.
         let turn_was_active = self.turn_active || self.prompt_in_flight > 0;
-        let expected_turn_end = self.last_prompt_turn_end.max(self.turn_ends_seen) + 1;
-        self.last_prompt_turn_end = expected_turn_end;
+        let expected_turn_end = self.turn_end_watermark.next_expected();
         self.prompt_in_flight += 1;
         let _ = self.prompt_orders.send(PromptOrder {
             client: self.client.clone(),
@@ -2934,7 +2994,10 @@ impl SessionUi {
                 // the idle state; re-arming it would strand WaitIdle until
                 // timeout. The per-submit end watermark also keeps a prior
                 // turn's end from settling a queued later prompt.
-                if self.turn_ends_seen < note.expected_turn_end {
+                if !self
+                    .turn_end_watermark
+                    .end_already_seen(note.expected_turn_end)
+                {
                     self.turn_active = true;
                     self.start_loader(view);
                     self.dirty = true;
@@ -8295,7 +8358,7 @@ impl SessionUi {
                 // trailing `agent_end` frames from the previous turn must
                 // not cancel a turn admitted in between (prompt queueing).
                 self.streaming_index = None;
-                self.turn_ends_seen += 1;
+                self.turn_end_watermark.note_turn_end();
                 self.turn_active = false;
                 view.working = None;
                 view.working_since = None;
@@ -9482,5 +9545,102 @@ mod retry_collapse_tests {
             kind: StatusKind::Info,
         }]);
         assert!(!pop_superseded_attempt_row(&mut view));
+    }
+}
+
+#[cfg(test)]
+mod turn_end_watermark_tests {
+    use super::TurnEndWatermark;
+
+    /// The pairing invariant on one subscription: every submit reserves
+    /// the next end in submit order, a landed end settles exactly its own
+    /// submit, and a queued later prompt is not cleared by the prior
+    /// turn's end.
+    #[test]
+    fn submits_pair_one_to_one_with_ends_on_one_subscription() {
+        let mut watermark = TurnEndWatermark::default();
+        // Submit one; its end has not been seen yet.
+        let first = watermark.next_expected();
+        assert!(
+            !watermark.end_already_seen(first),
+            "the first submit's loader must arm until its end lands"
+        );
+        watermark.note_turn_end();
+        assert!(
+            watermark.end_already_seen(first),
+            "the first submit's ack after its own end must not re-arm"
+        );
+        // A queued second submit: the FIRST submit's end must not clear it.
+        let second = watermark.next_expected();
+        assert!(
+            !watermark.end_already_seen(second),
+            "a queued submit's loader waits for its own end"
+        );
+        // The complete-turn-before-ack window: the second's end lands
+        // before its ack.
+        watermark.note_turn_end();
+        assert!(
+            watermark.end_already_seen(second),
+            "an end that beat its own ack settles its submit"
+        );
+    }
+
+    /// The exit-gate wedge family's latch, replayed: an outlived submit's
+    /// end never reaches the pane after the switch, so the next submit's
+    /// ack must not wait on a watermark the pane can never reach. The
+    /// rebase is what keeps the pairing over ends the mounted
+    /// subscription can actually deliver.
+    #[test]
+    fn a_switched_away_ends_do_not_inflate_the_pane_watermark() {
+        let mut watermark = TurnEndWatermark::default();
+        // Submit "for a" on the first session; its end is delayed past the
+        // switch, so the pane never observes it.
+        let _outlived = watermark.next_expected();
+        // The switch: a fresh attach replaces the event source.
+        watermark.rebase();
+        // Submit "for b" on the switched-to session. The wedge order: its
+        // turn end lands BEFORE its own ack.
+        let switched = watermark.next_expected();
+        watermark.note_turn_end();
+        assert!(
+            watermark.end_already_seen(switched),
+            "the post-switch submit's ack must not re-arm a turn that already ended"
+        );
+        // Same-subscription sequences after the rebase keep pairing 1:1:
+        // the next submit waits for the NEXT delivered end.
+        let next = watermark.next_expected();
+        assert!(!watermark.end_already_seen(next));
+        watermark.note_turn_end();
+        assert!(watermark.end_already_seen(next));
+    }
+
+    /// The rebase is a uniform shift: post-rebase pairs read exactly like
+    /// a fresh pane's pairs, so same-session behavior after a rebind is
+    /// identical to the initial attach's behavior.
+    #[test]
+    fn a_rebased_watermark_reads_like_a_fresh_pane() {
+        let mut rebased = TurnEndWatermark::default();
+        rebased.next_expected();
+        rebased.note_turn_end();
+        rebased.rebase();
+        let mut fresh = TurnEndWatermark::default();
+        let a = rebased.next_expected();
+        let b = fresh.next_expected();
+        assert_eq!(
+            a, b,
+            "the first post-rebase submit reserves the same slot as a fresh pane's"
+        );
+        assert_eq!(
+            rebased.end_already_seen(a),
+            fresh.end_already_seen(b),
+            "identical arming decisions"
+        );
+        rebased.note_turn_end();
+        fresh.note_turn_end();
+        assert_eq!(
+            rebased.end_already_seen(a),
+            fresh.end_already_seen(b),
+            "identical settle decisions"
+        );
     }
 }
