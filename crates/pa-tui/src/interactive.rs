@@ -48,7 +48,7 @@ const TELEMETRY_EXIT_TIMEOUT_MS: u64 = 500;
 /// The headless exit gate's settle bound: after the plan completes
 /// ([`UiInput::HeadlessDone`]), the run must end within this much wall
 /// clock. The gate has no other bound — a settle member that never drains
-/// (the interactive_daemon_e2e exit-gate wedge family: a submit/switch
+/// (the `interactive_daemon_e2e` exit-gate wedge family: a submit/switch
 /// round-trip race latching `turn_active` with the whole daemon trio
 /// idle) parks the run in `Runtime::block_on` forever and eats a whole
 /// CI job budget with no failure name. The bound converts that into an
