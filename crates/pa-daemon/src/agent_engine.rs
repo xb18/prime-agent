@@ -756,18 +756,17 @@ impl AgentSessionEngine {
                     let Some(path) = path else {
                         return (None, None, None);
                     };
-                    match pa_core::session::window::WindowedSessionStore::open(&path) {
-                        Ok(Some(window)) => {
-                            let goal = window.goal_state().cloned();
-                            (goal, Some(window), None)
-                        }
-                        Ok(None) | Err(_) => {
-                            let store = crate::session_store::SessionFile::open(&path).ok();
-                            let goal =
-                                store.as_ref().and_then(crate::goal_state_persist::goal_state_in_session_file);
-                            let branch = store.map(|store| store.branch_file_entries());
-                            (goal, None, branch)
-                        }
+                    if let Ok(Some(window)) = pa_core::session::window::WindowedSessionStore::open(&path)
+                    {
+                        let goal = window.goal_state().cloned();
+                        (goal, Some(window), None)
+                    } else {
+                        let store = crate::session_store::SessionFile::open(&path).ok();
+                        let goal = store
+                            .as_ref()
+                            .and_then(crate::goal_state_persist::goal_state_in_session_file);
+                        let branch = store.map(|store| store.branch_file_entries());
+                        (goal, None, branch)
                     }
                 })
                 .await?;
