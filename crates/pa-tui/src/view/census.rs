@@ -336,7 +336,7 @@ impl AgentView {
                 "span": std::mem::size_of::<crate::Span>(),
                 "line": std::mem::size_of::<crate::Line>(),
                 "style": style_size,
-                "packed_span": std::mem::size_of::<crate::view::layout::ProbePackedSpan>(),
+                "packed_span": if stats.spans > 0 { stats.records_as_built_bytes / stats.spans } else { 0 },
             },
             "chat_entries": self.chat.len(),
             "chat_kinds": kinds,
