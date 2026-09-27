@@ -68,11 +68,11 @@ pub(super) struct RowPack {
     blob: String,
 }
 
-impl RowPack {
-    /// PROBE-ONLY (tui-scroll-retain2 census): the packed record type,
-    /// exposed to the probe census for size reporting. Never ships.
-    pub(super) type ProbePackedSpan = PackedSpan;
+/// PROBE-ONLY (tui-scroll-retain2 census): the packed record type,
+/// exposed to the probe census for size reporting. Never ships.
+pub(super) type ProbePackedSpan = PackedSpan;
 
+impl RowPack {
     /// PROBE-ONLY (tui-scroll-retain2 census): the packed shape (rows,
     /// span records, index capacity bytes, record capacity bytes, blob
     /// capacity bytes). Never ships.

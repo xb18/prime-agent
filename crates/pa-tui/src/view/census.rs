@@ -18,10 +18,12 @@ use std::io::Write;
 /// cacheable first-visit renders, [renders, rows, content_bytes] for
 /// transcript-tail renders, and splash renders. Absolute since process
 /// start; census rows are append-only, so phase deltas subtract offline.
-pub(super) static PROBE_UNC: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
-pub(super) static PROBE_FV: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
-pub(super) static PROBE_TAIL: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
-pub(super) static PROBE_SPLASH: Cell<u64> = const { Cell::new(0) };
+std::thread_local! {
+    pub(super) static PROBE_UNC: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
+    pub(super) static PROBE_FV: Cell<[u64; 4]> = const { Cell::new([0; 4]) };
+    pub(super) static PROBE_TAIL: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
+    pub(super) static PROBE_SPLASH: Cell<u64> = const { Cell::new(0) };
+}
 
 /// Note one uncacheable (transient) entry render (probe).
 pub(super) fn note_unc(rows: usize, spans: usize, content: usize) {
@@ -293,7 +295,7 @@ impl AgentView {
         let mut md_content_cap = 0usize;
         for (_index, cache) in md.iter() {
             md_cache_entries += 1;
-            for (key, key_lines) in cache.iter() {
+            for (key, key_lines) in cache.0.iter() {
                 md_blocks += 1;
                 md_key_bytes += key.len();
                 for line in key_lines {
