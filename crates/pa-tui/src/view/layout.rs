@@ -69,6 +69,31 @@ pub(super) struct RowPack {
 }
 
 impl RowPack {
+    /// PROBE-ONLY (tui-scroll-retain2 census): the packed record type,
+    /// exposed to the probe census for size reporting. Never ships.
+    pub(super) type ProbePackedSpan = PackedSpan;
+
+    /// PROBE-ONLY (tui-scroll-retain2 census): the packed shape (rows,
+    /// span records, index capacity bytes, record capacity bytes, blob
+    /// capacity bytes). Never ships.
+    pub(super) fn census_shape(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.len(),
+            self.spans.len(),
+            self.first.capacity() * std::mem::size_of::<u32>(),
+            self.spans.capacity() * std::mem::size_of::<PackedSpan>(),
+            self.blob.capacity(),
+        )
+    }
+
+    /// PROBE-ONLY (tui-scroll-retain2 census): per-span (len, style)
+    /// pairs (style-table + span-length distributions). Never ships.
+    pub(super) fn census_spans(
+        &self,
+    ) -> impl Iterator<Item = (u32, ratatui::style::Style)> + '_ {
+        self.spans.iter().map(|span| (span.len, span.style))
+    }
+
     /// Pack freshly rendered rows (byte-exact: boundaries, styles, and
     /// content bytes are preserved; empty spans keep their records), or
     /// `None` when the rows cannot be represented: the records store

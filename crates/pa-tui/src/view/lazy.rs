@@ -191,6 +191,8 @@ impl AgentView {
                 let splash = splash.get_or_insert_with(|| {
                     #[cfg(test)]
                     SPLASH_RENDERS.with(|count| count.set(count.get() + 1));
+                    // PROBE-ONLY (tui-scroll-retain2 census).
+                    super::census::note_splash();
                     // The suppressed splash is an empty section: the
                     // sparse walker skips zero-row sections exactly
                     // like an empty tail.
@@ -205,7 +207,17 @@ impl AgentView {
                 let tail = tail.get_or_insert_with(|| {
                     #[cfg(test)]
                     TAIL_RENDERS.with(|count| count.set(count.get() + 1));
-                    std::sync::Arc::new(view.render_transcript_tail(window.width))
+                    let rendered = view.render_transcript_tail(window.width);
+                    // PROBE-ONLY (tui-scroll-retain2 census).
+                    super::census::note_tail(
+                        rendered.len(),
+                        rendered
+                            .iter()
+                            .flat_map(|line| line.iter())
+                            .map(|span| span.content.len())
+                            .sum(),
+                    );
+                    std::sync::Arc::new(rendered)
                 });
                 EntryRows::Fresh(tail.clone())
             } else {
@@ -373,7 +385,17 @@ impl AgentView {
                     let rows = tail.get_or_insert_with(|| {
                         #[cfg(test)]
                         TAIL_RENDERS.with(|count| count.set(count.get() + 1));
-                        std::sync::Arc::new(self.render_transcript_tail(width))
+                        let rendered = self.render_transcript_tail(width);
+                        // PROBE-ONLY (tui-scroll-retain2 census).
+                        super::census::note_tail(
+                            rendered.len(),
+                            rendered
+                                .iter()
+                                .flat_map(|line| line.iter())
+                                .map(|span| span.content.len())
+                                .sum(),
+                        );
+                        std::sync::Arc::new(rendered)
                     });
                     (
                         last,
@@ -393,6 +415,8 @@ impl AgentView {
                 let splash = splash.get_or_insert_with(|| {
                     #[cfg(test)]
                     SPLASH_RENDERS.with(|count| count.set(count.get() + 1));
+                    // PROBE-ONLY (tui-scroll-retain2 census).
+                    super::census::note_splash();
                     // The suppressed splash is an empty section: the
                     // sparse walker skips zero-row sections exactly
                     // like an empty tail.
@@ -408,7 +432,17 @@ impl AgentView {
                 let tail = tail.get_or_insert_with(|| {
                     #[cfg(test)]
                     TAIL_RENDERS.with(|count| count.set(count.get() + 1));
-                    std::sync::Arc::new(view.render_transcript_tail(width))
+                    let rendered = view.render_transcript_tail(width);
+                    // PROBE-ONLY (tui-scroll-retain2 census).
+                    super::census::note_tail(
+                        rendered.len(),
+                        rendered
+                            .iter()
+                            .flat_map(|line| line.iter())
+                            .map(|span| span.content.len())
+                            .sum(),
+                    );
+                    std::sync::Arc::new(rendered)
                 });
                 return EntryRows::Fresh(tail.clone());
             }
@@ -571,6 +605,22 @@ impl AgentView {
             index == 0,
             preceded_by_tool,
         ));
+        // PROBE-ONLY (tui-scroll-retain2 census): transient-path churn
+        // counters (cacheable first-visit vs uncacheable renders).
+        {
+            let cacheable_now = self.entry_cacheable_at(index, entry);
+            let spans: usize = rows.iter().map(|line| line.len()).sum();
+            let content: usize = rows
+                .iter()
+                .flat_map(|line| line.iter())
+                .map(|span| span.content.len())
+                .sum();
+            if cacheable_now {
+                super::census::note_fv(rows.len(), spans, content);
+            } else {
+                super::census::note_unc(rows.len(), spans, content);
+            }
+        }
         if self.entry_cacheable_at(index, entry) {
             // The cache is storage, not output: the entry's rows stay
             // resident for the process lifetime, so they are stored
