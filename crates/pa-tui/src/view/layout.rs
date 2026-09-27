@@ -100,7 +100,7 @@ impl RowPack {
         (
             self.len(),
             self.spans.len(),
-            self.first.capacity() * std::mem::size_of::<u32>(),
+            self.starts.capacity() * std::mem::size_of::<RowStart>(),
             self.spans.capacity() * std::mem::size_of::<PackedSpan>(),
             self.blob.capacity(),
         )
@@ -111,7 +111,16 @@ impl RowPack {
     pub(super) fn census_spans(
         &self,
     ) -> impl Iterator<Item = (u32, ratatui::style::Style)> + '_ {
-        self.spans.iter().map(|span| (span.len, span.style))
+        self.spans
+            .iter()
+            .map(|span| (span.len, self.styles[span.style as usize]))
+    }
+
+    /// PROBE-ONLY (tui-scroll-retain2 census): the style table's
+    /// capacity bytes (the per-pack dedup table the compacted records
+    /// index into). Never ships.
+    pub(super) fn census_style_table_bytes(&self) -> usize {
+        self.styles.capacity() * std::mem::size_of::<ratatui::style::Style>()
     }
 
     /// Pack freshly rendered rows (byte-exact: boundaries, styles, and

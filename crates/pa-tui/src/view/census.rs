@@ -79,6 +79,7 @@ struct SlotStats {
     distinct_styles: std::collections::BTreeMap<usize, usize>,
     max_distinct_styles: usize,
     style_table_bytes: usize,
+    style_table_cap_bytes: usize,
     /// Span-content length histogram (varint sizing): [<=7, <=15, <=31,
     /// <=63, <=127, <=255, <=1023, <=65535, >65535].
     len_hist: [usize; 9],
@@ -230,6 +231,7 @@ impl AgentView {
                 }
                 let pack = &layout.rows;
                 let (rows, spans, index_cap, record_cap, blob_cap) = pack.census_shape();
+                let style_table_cap = pack.census_style_table_bytes();
                 let mut distinct: std::collections::HashSet<ratatui::style::Style> =
                     std::collections::HashSet::new();
                 let mut len_hist = [0usize; 9];
@@ -263,6 +265,7 @@ impl AgentView {
                     *s.distinct_styles.entry(d).or_insert(0) += 1;
                     s.max_distinct_styles = s.max_distinct_styles.max(d);
                     s.style_table_bytes += d * style_size;
+                    s.style_table_cap_bytes += style_table_cap;
                     for (i, n) in len_hist.iter().enumerate() {
                         s.len_hist[i] += n;
                     }
@@ -353,6 +356,7 @@ impl AgentView {
                 "total_as_built_bytes": packed_total_as_built,
                 "row_offset_index_delta_bytes": stats.rows * 4,
                 "style_table_bytes": stats.style_table_bytes,
+                "style_table_cap_bytes": stats.style_table_cap_bytes,
                 "distinct_styles_hist": stats.distinct_styles,
                 "max_distinct_styles": stats.max_distinct_styles,
                 "span_len_hist": {
