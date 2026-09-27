@@ -156,6 +156,16 @@ pub fn render_markdown_tagged(
 #[derive(Default)]
 pub struct MarkdownBlockCache(std::collections::HashMap<String, Vec<Line>>);
 
+impl MarkdownBlockCache {
+    /// PROBE-ONLY (tui-scroll-retain2 census): the cached blocks (the
+    /// probe census walks them; never ships).
+    pub(crate) fn probe_blocks(
+        &self,
+    ) -> &std::collections::HashMap<String, Vec<crate::Line>> {
+        &self.0
+    }
+}
+
 /// The cache key (TS: `${width}|${token.type}|${nextTokenType}|${token.raw}`):
 /// the style discriminator (the dim thinking block), width, this block's
 /// kind, the following kind (a block's trailing blank row depends on it),

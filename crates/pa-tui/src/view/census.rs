@@ -295,7 +295,7 @@ impl AgentView {
         let mut md_content_cap = 0usize;
         for (_index, cache) in md.iter() {
             md_cache_entries += 1;
-            for (key, key_lines) in cache.0.iter() {
+            for (key, key_lines) in cache.probe_blocks().iter() {
                 md_blocks += 1;
                 md_key_bytes += key.len();
                 for line in key_lines {
